@@ -1,0 +1,338 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLM Prompt Engineering Lab</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        'primary': '#4f46e5',
+                        'primary-dark': '#4338ca',
+                    }
+                }
+            }
+        }
+    </script> 
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+        .tab-button.active {
+            border-bottom-width: 2px;
+            border-color: #4f46e5;
+            color: #4f46e5;
+            font-weight: 600;
+        }
+        .loading-spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #4f46e5;
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .code-block {
+            background-color: #1e293b;
+            color: #e2e8f0;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            white-space: pre-wrap;
+            font-family: monospace;
+            overflow-x: auto;
+        }
+    </style>
+</head>
+<body>
+
+<div class="min-h-screen p-4 sm:p-8">
+    <div class="max-w-6xl mx-auto bg-white shadow-xl rounded-xl p-6 sm:p-10">
+        <h1 class="text-3xl font-bold text-gray-800 mb-6 border-b pb-2">
+            Week 4: Prompt Engineering Lab
+        </h1>
+
+        <!-- Input Section -->
+        <div id="input-section" class="mb-8 p-6 bg-gray-50 border border-gray-200 rounded-lg">
+            <h2 class="text-xl font-semibold text-gray-700 mb-4">Prompt Configuration</h2>
+
+            <!-- System Instruction -->
+            <div class="mb-4">
+                <label for="system-instruction" class="block text-sm font-medium text-gray-700 mb-1">
+                    System Instruction (Defines Persona/Rules)
+                </label>
+                <textarea id="system-instruction" rows="3" class="w-full border border-gray-300 rounded-lg p-2 focus:ring-primary focus:border-primary" placeholder="Example: You are a helpful but skeptical historical analyst. Always question assumptions."></textarea>
+            </div>
+
+            <!-- User Query -->
+            <div class="mb-6">
+                <label for="user-query" class="block text-sm font-medium text-gray-700 mb-1">
+                    User Query (Your Prompt)
+                </label>
+                <textarea id="user-query" rows="5" class="w-full border border-gray-300 rounded-lg p-2 focus:ring-primary focus:border-primary" placeholder="Example: Explain the core difference between Zero-shot and Few-shot prompting."></textarea>
+                <p class="text-xs text-gray-500 mt-1">
+                    To test **Chain-of-Thought (CoT)**, start your query with "Think step-by-step and show your work..."
+                </p>
+            </div>
+
+            <!-- Options & Submit -->
+            <div class="flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div class="flex flex-wrap gap-4 text-sm">
+                    <label class="flex items-center space-x-2 cursor-pointer">
+                        <input type="checkbox" id="structured-output" class="rounded text-primary focus:ring-primary">
+                        <span class="text-gray-700">Structured Output (JSON)</span>
+                    </label>
+                    <label class="flex items-center space-x-2 cursor-pointer">
+                        <input type="checkbox" id="google-grounding" class="rounded text-primary focus:ring-primary">
+                        <span class="text-gray-700">Google Search Grounding (Live Data)</span>
+                    </label>
+                </div>
+
+                <button id="generate-button" onclick="handleFormSubmit(event)" class="w-full sm:w-auto px-6 py-2 bg-primary text-white font-semibold rounded-lg shadow-md hover:bg-primary-dark transition duration-150 flex items-center justify-center disabled:opacity-50">
+                    <span id="button-text">Generate Response</span>
+                    <div id="loading-indicator" class="loading-spinner hidden ml-2"></div>
+                </button>
+            </div>
+
+            <div id="json-schema-display" class="hidden mt-4 p-3 bg-indigo-50 border border-indigo-200 rounded-md">
+                <p class="text-sm font-medium text-indigo-700 mb-2">JSON Schema Used for Structured Output:</p>
+                <div class="code-block text-xs">
+                    {
+"type": "OBJECT",
+"properties": {
+"reasoning_steps": { "type": "ARRAY", "items": { "type": "STRING" } },
+"final_summary": { "type": "STRING" },
+"confidence_score": { "type": "NUMBER", "description": "Score from 0 to 100." }
+}
+}
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Output Section -->
+        <div id="output-section">
+            <h2 class="text-xl font-semibold text-gray-700 mb-4">LLM Response</h2>
+
+            <div id="response-container" class="min-h-[200px] p-4 border border-gray-300 rounded-lg bg-gray-50 flex items-center justify-center text-gray-500">
+                Awaiting your prompt...
+            </div>
+
+            <div id="citation-container" class="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-md hidden">
+                <p class="text-sm font-medium text-yellow-800 mb-1">Citations:</p>
+                <div id="citations" class="text-xs text-yellow-700 space-y-1"></div>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<script type="module">
+    // --- Configuration and Environment Setup ---//
+    const apiKey = "AIzaSyBEJkHH5dhj2BAvTztJM3_fzvthbgQcxDk";
+    const modelName = 'gemini-2.5-flash-preview-09-2025';
+    const apiUrlBase = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
+
+    const generateButton = document.getElementById('generate-button');
+    const buttonText = document.getElementById('button-text');
+    const loadingIndicator = document.getElementById('loading-indicator');
+    const responseContainer = document.getElementById('response-container');
+    const citationContainer = document.getElementById('citation-container');
+    const citationsDiv = document.getElementById('citations');
+    const structuredCheckbox = document.getElementById('structured-output');
+    const jsonSchemaDisplay = document.getElementById('json-schema-display');
+
+    // Sample JSON Schema for structured output lab
+    const structuredSchema = {
+        type: "OBJECT",
+        properties: {
+            reasoning_steps: { type: "ARRAY", items: { type: "STRING" } },
+            final_summary: { type: "STRING" },
+            confidence_score: { type: "NUMBER", description: "Score from 0 to 100." }
+        },
+        propertyOrdering: ["reasoning_steps", "final_summary", "confidence_score"]
+    };
+
+    // Toggle JSON schema visibility when checkbox changes
+    structuredCheckbox.addEventListener('change', (e) => {
+        if (e.target.checked) {
+            jsonSchemaDisplay.classList.remove('hidden');
+            // If structured, force no grounding as the schema overrides the tool
+            document.getElementById('google-grounding').checked = false;
+        } else {
+            jsonSchemaDisplay.classList.add('hidden');
+        }
+    });
+
+    document.getElementById('google-grounding').addEventListener('change', (e) => {
+        if (e.target.checked) {
+            // If grounding, force no structured output
+            structuredCheckbox.checked = false;
+            jsonSchemaDisplay.classList.add('hidden');
+        }
+    });
+
+
+    // --- Core API Interaction Logic ---
+
+    function setUILoading(isLoading) {
+        generateButton.disabled = isLoading;
+        if (isLoading) {
+            buttonText.textContent = 'Generating...';
+            loadingIndicator.classList.remove('hidden');
+            responseContainer.innerHTML = `<div class="loading-spinner"></div> <span class="ml-2">Thinking...</span>`;
+            citationContainer.classList.add('hidden');
+        } else {
+            buttonText.textContent = 'Generate Response';
+            loadingIndicator.classList.add('hidden');
+        }
+    }
+
+    async function generateResponse(userQuery, systemPrompt, isGrounded, isStructured) {
+        let payload = {
+            contents: [{ parts: [{ text: userQuery }] }],
+            systemInstruction: { parts: [{ text: systemPrompt }] },
+        };
+
+        if (isGrounded) {
+            payload.tools = [{ "google_search": {} }];
+        }
+
+        if (isStructured) {
+             // Forcing structured output requires specific config
+             payload.generationConfig = {
+                responseMimeType: "application/json",
+                responseSchema: structuredSchema
+             };
+             // Note: Structured generation overrides search grounding
+        }
+
+        let retryCount = 0;
+        const maxRetries = 5;
+
+        while (retryCount < maxRetries) {
+            try {
+                const response = await fetch(apiUrlBase, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const result = await response.json();
+                const candidate = result.candidates?.[0];
+
+                if (!candidate) {
+                    throw new Error("No candidates returned by the model.");
+                }
+
+                const textPart = candidate.content?.parts?.[0];
+                if (!textPart || !textPart.text) {
+                    throw new Error("Generated text content is missing.");
+                }
+
+                let text = textPart.text;
+                let sources = [];
+
+                // 2. Extract grounding sources
+                const groundingMetadata = candidate.groundingMetadata;
+                if (groundingMetadata && groundingMetadata.groundingAttributions) {
+                    sources = groundingMetadata.groundingAttributions
+                        .map(attribution => ({
+                            uri: attribution.web?.uri,
+                            title: attribution.web?.title,
+                        }))
+                        .filter(source => source.uri && source.title);
+                }
+
+                return { text, sources };
+
+            } catch (error) {
+                console.error(`Attempt ${retryCount + 1} failed:`, error);
+                retryCount++;
+                if (retryCount >= maxRetries) {
+                    throw new Error("Max retries reached. Failed to generate content.");
+                }
+                // Exponential backoff: 2^retryCount seconds
+                const delay = Math.pow(2, retryCount) * 1000;
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
+    }
+
+    function displayResult(text, sources, isStructured) {
+        citationsDiv.innerHTML = '';
+        citationContainer.classList.add('hidden');
+
+        if (isStructured) {
+            // Display JSON in a pretty, code-block format
+            try {
+                const jsonObject = JSON.parse(text);
+                const formattedJson = JSON.stringify(jsonObject, null, 2);
+                responseContainer.innerHTML = `<pre class="code-block">${formattedJson["final_summary"]}</pre>`;
+            } catch (e) {
+                responseContainer.innerHTML = `<p class="text-red-600 font-bold">Error parsing JSON output. Raw Text:</p><p class="whitespace-pre-wrap">${text}</p>`;
+            }
+        } else {
+            // Display standard markdown text
+            // Simple markdown to HTML conversion for readability
+            let htmlText = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+            htmlText = htmlText.replace(/### (.*)/g, '<h3>$1</h3>');
+            htmlText = htmlText.replace(/## (.*)/g, '<h2>$1</h2>');
+            htmlText = htmlText.replace(/\n/g, '<br>');
+            responseContainer.innerHTML = `<p>${htmlText}</p>`;
+        }
+
+
+        if (sources && sources.length > 0) {
+            citationContainer.classList.remove('hidden');
+            sources.forEach((source, index) => {
+                const link = document.createElement('a');
+                link.href = source.uri;
+                link.target = "_blank";
+                link.className = "text-primary hover:underline block truncate";
+                link.textContent = `${index + 1}. ${source.title}`;
+                citationsDiv.appendChild(link);
+            });
+        }
+    }
+
+    // --- Event Handler ---
+    window.handleFormSubmit = async (event) => {
+        event.preventDefault();
+        const userQuery = document.getElementById('user-query').value.trim();
+        const systemPrompt = document.getElementById('system-instruction').value.trim();
+        const isGrounded = document.getElementById('google-grounding').checked;
+        const isStructured = document.getElementById('structured-output').checked;
+
+        if (!userQuery) {
+            responseContainer.innerHTML = '<p class="text-red-500">Please enter a user query.</p>';
+            return;
+        }
+
+        setUILoading(true);
+
+        try {
+            const { text, sources } = await generateResponse(userQuery, systemPrompt, isGrounded, isStructured);
+            displayResult(text, sources, isStructured);
+        } catch (error) {
+            console.error("Critical Generation Error:", error);
+            responseContainer.innerHTML = `<p class="text-red-500">Generation failed: ${error.message}. Check the console for details.</p>`;
+        } finally {
+            setUILoading(false);
+        }
+    };
+</script>
+
+</body>
+</html>
