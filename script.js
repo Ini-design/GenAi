@@ -1,5 +1,5 @@
    // --- Configuration and Environment Setup ---//
-    const apiKey = "AIzaSyBEJkHH5dhj2BAvTztJM3_fzvthbgQcxDk";
+    const apiKey = "AIzaSyByMprpCTxIH_aCOlxjQDX7WeOMNyhi3jU";
     const modelName = 'gemini-2.5-flash-preview-09-2025';
     const apiUrlBase = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`;
 
